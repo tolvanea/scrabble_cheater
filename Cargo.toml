@@ -1,0 +1,18 @@
+[package]
+name = "scrabble_cheater"
+version = "0.1.0"
+authors = ["tolvanea <alpi.tolvanen@tutanota.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ndarray = "0.14.0"
+rand = {version = "0.8.0", features = ["serde"]}
+anyhow = "1.0.36"
+thiserror = "1.0.22"
+#probabilistic-collections = "0.7.0"
+csv = "1.1.5"
+unicode-segmentation = "1.7.1"
+serde = "1.0.118"
+bincode = "1.3.1"
