@@ -13,7 +13,7 @@ pub enum Tile {
     Empty,
 }
 
-impl Tile{
+impl Tile {
     pub fn unwrap(self) -> (usize, char) {
         match self {
             Tile::Occupied{ idx, letter } => (idx, letter),
@@ -28,6 +28,14 @@ impl Tile{
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TilePriority {
+    Word,
+    PartialWord,
+    Crap,
+    NotUsed,
+}
+
 #[derive(Debug, Clone)]
 pub struct Board {
     /// Board/table that is square grid
@@ -36,6 +44,8 @@ pub struct Board {
     pub letters: Vec<char>,
     /// Indices of letters that are placed on board/table
     pub placed: Vec<(usize, usize)>,
+    /// Determine if tile is free to use or more important
+    pub priorities: Vec<TilePriority>,
     /// Random number generator
     pub rng: StdRng,
     /// With dictionaries one can test whether string is a real word or part of a real word.
@@ -59,23 +69,26 @@ impl Board {
         let dictionaries = load_or_generate(path, dicts_for_word_parts).unwrap();
         let table = Array2::from_elem((side_length, side_length), Tile::Empty);
         // self.letters corresponds indices with self.placed
-        let placed = Vec::<(usize, usize)>::new();
+        let placed = Vec::new();
+        let priorities = Vec::new();
 
         let mut board = Board{
             table,
             letters,
             placed,
+            priorities,
             rng,
             dictionaries,
         };
-        board.initial_position();
+        board.initialize();
         board.invariant().expect("Invarant broken");
         return board;
     }
 
-    pub fn initial_position(&mut self) {
+    pub fn initialize(&mut self) {
         self.placed.clear();
         self.table.iter_mut().for_each(|tile| *tile = Tile::Empty);
+        self.priorities = vec![TilePriority::NotUsed; self.letters.len()];
 
         let mut unplaced = self.letters.clone(); // Unplaced letters
         unplaced.reverse();
@@ -91,43 +104,52 @@ impl Board {
             }
         }
         // Move one tile in the center of board
+        let id = self.rng.gen_range(0..self.letters.len());
         let new_pos = (self.table.shape()[0] / 2 + 1, self.table.shape()[0] / 2 + 1);
-        let old_pos = &mut self.placed[self.rng.gen_range(0..self.letters.len())];
+        let old_pos = &mut self.placed[id];
         self.table[new_pos] = self.table[*old_pos];
         self.table[*old_pos] = Tile::Empty;
         *old_pos = new_pos;
+        self.priorities[id] = TilePriority::Crap;
     }
 
-    pub fn fitness(&self) -> f64 {
+    pub fn fitness(&mut self) -> (f64, usize) {
         let mut sum = 0.0;
         let mut contains_full_words = false;
         let mut contains_crap = false;
 
-        // count words and word stumps for rows and columns
-        for line in self.table.outer_iter().chain(self.table.axis_iter(Axis(1))) {
+        // let mut rows = self.table.outer_iter().enumerate()
+        //     .flat_map(|(i, r)| r.iter().enumerate().map(|(j, t)| ((i, j), t)));
+        // let mut cols = self.table.axis_iter(Axis(1)).enumerate()
+        //     .flat_map(|(j, c)| c.iter().enumerate().map(|(i, t)| ((i, j), t)));
+        let rows = self.table.outer_iter().map(|r| r.into_iter().skip(0)).skip(2);
+        let cols = self.table.axis_iter(Axis(1)).map(|c| c.into_iter().skip(2)).skip(0);
+        for line in rows.chain(cols) {
+            // Count words and word stumps. Also keep track what indices those letters are
             let mut words = Vec::<Vec<char>>::with_capacity(MAX_WORD_LENGTH);
-            let mut prev = false; // last iteration was part of word
-            for tile in line.iter() {
+            let mut ids = Vec::<Vec<usize>>::with_capacity(MAX_WORD_LENGTH);
+            let mut prev = false; // test if last iteration was part of word
+            for tile in line {
                 match tile {
-                    Tile::Occupied {idx: _, letter} if !prev => {
+                    Tile::Occupied { idx, letter } if !prev => {
                         prev = true;
                         words.push(vec![*letter]);
+                        ids.push(vec![*idx]);
+                        self.priorities[*idx] = TilePriority::Crap;
                     }
-                    Tile::Occupied {idx: _, letter} if prev => {
+                    Tile::Occupied { idx, letter } if prev => {
                         words.last_mut().unwrap().push(*letter);
+                        ids.last_mut().unwrap().push(*idx);
+                        self.priorities[*idx] = TilePriority::Crap;
                     }
                     Tile::Empty if prev => {
-                        prev = false
+                        prev = false;
                     }
                     _ => {},
                 }
             }
 
-            for word in words {
-                if word.len() == 1 {
-                    contains_crap = true;
-                    continue;
-                }
+            for (word, ids) in words.into_iter().zip(ids.into_iter()) {
                 let word: String = word.into_iter().collect();
                 let is_whole_word = self.dictionaries[0].contains(&word);
                 let is_partial_word = self.dictionaries[1].contains(&word);
@@ -135,9 +157,26 @@ impl Board {
                 if is_whole_word {
                     sum += ((word.len()-1) as f64).powi(2);
                     contains_full_words = true;
+                    for id in ids {
+                        self.priorities[id] = TilePriority::Word;
+                    }
                     continue;
                 } else if is_partial_word {
                     sum += ((word.len()-1) as f64).powi(3).sqrt();
+                    for id in ids {
+                        let pr = &mut self.priorities[id];
+                        if *pr != TilePriority::Word {
+                            *pr = TilePriority::PartialWord;
+                        }
+                    }
+                } else {
+                    sum -= (word.len()-1) as f64;
+                    for id in ids {
+                        let pr = &mut self.priorities[id];
+                        if (*pr != TilePriority::Word) && (*pr != TilePriority::PartialWord) {
+                            *pr = TilePriority::Crap;
+                        }
+                    }
                 }
                 contains_crap = true;
             }
@@ -154,15 +193,17 @@ impl Board {
                 sum -= tiles as f64;
             }
         }
-        if contains_full_words && !contains_crap {
-            return -sum  // Solution found!
-        } else {
-            return self.letters.len().pow(3) as f64 - sum;
+        let mut letters_in_words = 0;
+        for p in self.priorities.iter() {
+            if *p == TilePriority::Word {
+                letters_in_words += 1;
+            }
         }
-    }
-
-    pub fn diff_of_random_move() {
-
+        if contains_full_words && !contains_crap {
+            return (-sum, letters_in_words)  // Solution found!
+        } else {
+            return (self.letters.len().pow(3) as f64 - sum, letters_in_words);
+        }
     }
 
     pub fn draw(&self) {
@@ -196,12 +237,39 @@ impl Board {
                 }
             }
         }
+        for (id, pr) in self.priorities.iter().enumerate() {
+            let pos = self.placed[id];
+            match pr {
+                TilePriority::NotUsed => {
+                    if pos.0 >= 2 {
+                        return Err(anyhow!("Tile priority `NotUsed` at pos Pos {:?}", pos));
+                    }
+                },
+                _ => {
+                    if pos.0 < 2 {
+                        return Err(anyhow!("Tile priority is not `NotUsed` at pos Pos {:?}", pos));
+                    }
+                }
+            }
+        }
         return Ok(());
     }
 
     pub fn random_move(&mut self) {
-        let rng = &mut self.rng;
-        let id = rng.gen_range(0..self.letters.len());
+        if self.rng.gen_range(0..1000) == 0 {
+            self.invariant();
+        }
+
+        let id = loop {
+            let id = self.rng.gen_range(0..self.placed.len());
+            match self.priorities[id] {
+                TilePriority::Crap | TilePriority::NotUsed => break id,
+                TilePriority::Word => if self.rng.gen_range(0..20) == 0 { break id; },
+                TilePriority::PartialWord => if self.rng.gen_range(0..2) == 0 { break id },
+            }
+        };
+
+
         let old_pos: (usize, usize) = self.placed[id];
         let tile = self.table[old_pos];
         debug_assert!(tile != Tile::Empty);
@@ -209,30 +277,37 @@ impl Board {
         // Loop until new position has been found
         'outer: loop {
             let side = self.table.shape()[0] as isize;
-            // Some random position of existing tile
-            let s = self.placed[rng.gen_range(0..self.letters.len())];
-            // Trial position of new tile that is close to random choise
-            let mut n = (s.0 as isize, s.1 as isize);
-            let dir = [-1, 1][rng.gen_range(0..2)];
-            // Direction in which new tiles will be searched
-            let d = if rng.gen_range(0..2) == 0 {
-                (dir, 0)
+            let (mut ni, d) = if self.rng.gen_range(0..9) > 0 {
+                // Trial position of new tile that is at position of existing tile
+                let nu = self.placed[self.rng.gen_range(0..self.letters.len())];
+                let ni = (nu.0 as isize, nu.1 as isize);
+                // Direction in which new tiles will be searched
+                let d = [(-1, 0), (1, 0), (0, 1), (0, -1)][self.rng.gen_range(0..4)];
+                (ni, d)
             } else {
-                (0, dir)
+                let nu = (self.rng.gen_range(0..2), 0);
+                let ni = (nu.0 as isize, nu.1 as isize);
+                let d = (0, 1);
+                (ni, d)
             };
             // Step in chosen direction until free tile is found
             loop {
-                n = (n.0 + d.0, n.1 + d.1);
-                let nu = (n.0 as usize, n.1 as usize);
+                ni = (ni.0 + d.0, ni.1 + d.1);
+                let nu = (ni.0 as usize, ni.1 as usize);
                 // Check if new position is valid. First 2 rows are reserved for unplaced letters.
-                if (2 <= n.0 && 0 <= n.1) && (n.0 < side && n.1 < side) && nu != old_pos {
+                if (0 <= ni.0 && 0 <= ni.1) && (ni.0 < side && ni.1 < side) && nu != old_pos {
                     if !self.table[nu].is_occupied() {
                         self.placed[id] = nu;
                         self.table[nu] = tile;
+                        self.priorities[id] = if ni.0 < 2 {
+                            TilePriority::NotUsed
+                        } else {
+                            TilePriority::Crap
+                        };
                         return;
                     }
                 } else {
-                    // Bad choice for random tile, choose a new one.
+                    // Random choice was bad. Choose a new one.
                     continue 'outer
                 }
             }

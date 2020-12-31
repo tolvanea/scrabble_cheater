@@ -5,28 +5,28 @@ use my_prelude::*;
 use board::Board;
 use rand::Rng;
 
-pub fn metropolis_solve(mut board: Board, temp: f64, blocks: usize) -> (Board, usize, f64) {
-    let mut fitness_old_state = board.fitness();
+pub fn metropolis_solve(mut board: Board, temp: f64, blocks: usize) -> (Board, usize, f64, usize) {
+    let mut fitness_old = board.fitness();
     for b in 0..blocks {
-        let old_table = board.table.clone();
-        let old_placed = board.placed.clone();
+        let table_old = board.table.clone();
+        let placed_old = board.placed.clone();
+        let priorities_old = board.priorities.clone();
         board.random_move();
-        let fitness_new_state = board.fitness();
-        if fitness_new_state < 0.0 {
-            println!("Solution found!");
-            board.fitness2();
-            return (board, b, fitness_new_state);
+        let fitness_new = board.fitness();
+        if fitness_new.0 < 0.0 {
+            return (board, b, fitness_new.0, fitness_new.1);
         }
-        let diff = fitness_new_state - fitness_old_state;
+        let diff = fitness_new.0 - fitness_old.0;
         let rnd = board.rng.gen_range(0.0..1.0);
         if (-diff / temp).exp() > rnd {
-            fitness_old_state = fitness_new_state;
+            fitness_old = fitness_new;
         } else {
-            board.table = old_table;
-            board.placed = old_placed;
+            board.table = table_old;
+            board.placed = placed_old;
+            board.priorities = priorities_old;
         }
     }
-    return (board, blocks, fitness_old_state);
+    return (board, blocks, fitness_old.0, fitness_old.1);
 }
 
 /*
@@ -55,21 +55,27 @@ fn run_once(letters: Vec<char>) {
     let parts = 10;
     let mut board = Board::new(16, letters);
     let mut iterated = 0;
+    let mut letters = 0;
     board.draw();
-    let mut fit = 0.0;
+    let mut fitness = 0.0;
     let before = std::time::Instant::now();
     for _ in 0..parts {
         let out = metropolis_solve(board.clone(), 1e0, tot_iters/parts);
         board = out.0;
         iterated += out.1;
-        fit = out.2;
-        println!("Fitness {}", fit);
+        fitness = out.2;
+        letters = out.3;
+        println!("Fitness {}", fitness);
         board.draw();
-        if fit < 0.0 {
+        if fitness < 0.0 {
+            println!("Solution found!");
             break;
         }
     }
-    println!("Fitness {}, Iters: {}, Elapsed: {} ms", fit, iterated,  before.elapsed().as_millis())
+    println!(
+        "Fitness {:.2}, Letters: {}, Elapsed: {} ms, Iters: {},",
+        fitness, letters,  before.elapsed().as_millis(), iterated
+    )
 }
 
 #[allow(dead_code)]
@@ -77,16 +83,23 @@ fn benchmark() {
     let letters: Vec<char> = "aaeiiouykklmnrtpsv".chars().collect();
     for &temp in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2].iter() {
         let num_samples = 10;
-        let mut samples= nd::Array1::from_elem(num_samples, 0.0);
+        let mut fit_samples= nd::Array1::from_elem(num_samples, 0.0);
+        let mut lett_samples= nd::Array1::from_elem(num_samples, 0.0);
         let mut board = Board::new(16, letters.clone());
-        for fit in samples.iter_mut() {
-            let (_board_sol, _iters, _) = metropolis_solve(board.clone(), temp, 100);
-            *fit = board.fitness();
-            board.initial_position();
+        for (fit, lett) in fit_samples.iter_mut().zip(lett_samples.iter_mut()) {
+            let (_board_sol, _iters, fitness, letters) = metropolis_solve(board.clone(), temp, 100);
+            *fit = fitness;
+            *lett = letters as f64;
+            board.initialize();
         }
-        let mean = samples.mean_axis(Axis(0)).unwrap();
-        let std = samples.std_axis(Axis(0), 0.0) / (samples.len() as f64).sqrt();
-        println!("Temp: {:e}, fitness: {}({})", temp, mean, std);
+        let fit_mean = fit_samples.mean_axis(Axis(0)).unwrap();
+        let fit_std = fit_samples.std_axis(Axis(0), 0.0) / (fit_samples.len() as f64).sqrt();
+        let lett_mean = lett_samples.mean_axis(Axis(0)).unwrap();
+        let lett_std = lett_samples.std_axis(Axis(0), 0.0) / (lett_samples.len() as f64).sqrt();
+        println!(
+            "Temp: {:e}, fitness: {:.2}({:.2}), word letters: {:.2}({:.2})",
+            temp, fit_mean, fit_std, lett_mean, lett_std
+        );
     }
 }
 
