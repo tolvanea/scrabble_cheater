@@ -28,33 +28,12 @@ pub fn metropolis(mut board: Board, temp: f64, blocks: usize) -> (Board, usize, 
     return (board, blocks, fitness_old.0, fitness_old.1, false);
 }
 
-/*
-1e0
-Fitness 5737,              Iters: 500000, Elapsed: 5751 ms
-Fitness 5768.803847577294, Iters: 500000, Elapsed: 5972 ms
-Fitness 5737,              Iters: 500000, Elapsed: 5751 ms
-
-3e0
-Fitness 5817.975420452547, Iters: 500000, Elapsed: 6206 ms
-Fitness 5811.514718625762, Iters: 500000, Elapsed: 6381 ms
-Fitness 5816.146993327801, Iters: 500000, Elapsed: 6106 ms
-
-3e-1
-Fitness 5782.975420452547, Iters: 500000, Elapsed: 5807 ms
-Fitness 5778,              Iters: 500000, Elapsed: 5946 ms
-Fitness 5780.171572875254, Iters: 500000, Elapsed: 5882 ms
-
-
-
-
- */
 
 #[allow(dead_code)]
-fn run_once() {
-    let given_letters: Vec<_> = "tnahivonajsnäenoilsteailk".chars().collect();
+fn run_once(given_letters: Vec<char>) {
     let tot_iters = 1_000_000;
     let parts = 100;
-    let constants = Some([20, 10, 10, 50, 30]);
+    let constants = Some([20, 10, 5, 50, 30]);
     let mut board = Board::new(20, given_letters.clone(), constants);
     let mut iterated = 0;
     let mut letters = 0;
@@ -86,19 +65,29 @@ fn run_once() {
     )
 }
 
+/// This function can be used to search good set of parameters. Parallel threads are used.
 #[allow(dead_code)]
-fn benchmark() {
+fn find_good_parameters() {
     use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
     //use rayon::prelude::*;
-    let temps = [3.0];
+    let params = [
+        (4.0, Some([20, 10, 5, 50, 30])),
+        (4.0, Some([20, 10, 7, 50, 30])),
+        (4.0, Some([20, 10, 3, 50, 30])),
+        (4.0, Some([20, 10, 5, 50, 20])),
+        (4.0, Some([20, 10, 5, 50, 40])),
+        (3.5, Some([20, 10, 5, 50, 30])),
+        (4.5, Some([20, 10, 5, 50, 30])),
+    ];
 
     let letters: Vec<char> = "aaeiioukklmnrtsv".chars().collect();
 
-    let mean_std: Vec<_> = temps.par_iter().map(|temp| {
-        let c = &Some([20, 10, 10, 50, 30]);
-        let num_samples = 40;
+    let board = Board::new(16, letters, None);
+    let mean_std: Vec<_> = params.par_iter().map(|(temp, c)| {
+        let num_samples = 100;
+        let mut board = board.clone();
+        board.constants = c.unwrap();
         let mut samples= nd::Array2::from_elem((num_samples, 3), 0.0);
-        let mut board = Board::new(16, letters.clone(), *c);
         for mut sample in samples.axis_iter_mut(Axis(0)) {
             let (_sol, iters, fitness, letters, _) = metropolis(board.clone(), *temp, 100_000);
             sample[0] = fitness;
@@ -111,17 +100,19 @@ fn benchmark() {
         (mean, std)
     }).collect();
 
-    for (mean, std) in mean_std.into_iter() {
+    println!("{:>39} {:<14}  {:<10}  {:<10}", "", "fitness", "letters", "iters");
+    for ((mean, std), (temp, c)) in mean_std.iter().zip(params.iter()) {
         println!(
-            "fitness: {:.2}({:.2}), letters: {:.2}({:.2}), iters: {:.2}({:.2})",
-            mean[0], std[0], mean[1], std[1], mean[2], std[2]
+            "Temp {:.1}, params {:?}:  {:.2}({:.2}),  {:.2}({:.2}), {:.2}({:.2})",
+            temp, c.unwrap(), mean[0], std[0], mean[1], std[1], mean[2], std[2]
         );
     }
 }
 
 
 
-
+// This function does not belong here in this project, as it is not anymore used. However,
+// it is a good general algorithm to slice strings.
 /// Extract UTF-8 compatible string slice by using character indices.
 /// If given indices are outside character boundaries, then valid part of string slice is
 /// returned in `Err`-variant.
@@ -166,7 +157,8 @@ fn substr(s: &str, begin: usize, length: Option<usize>) -> Result<&str, &str> {
 }
 
 fn main() -> Res<()> {
-    run_once();
-    //benchmark();
+    let given_letters = "tnahivonajsnäenoilsteailk".chars().collect();
+    run_once(given_letters);
+    //find_good_parameters();
     return Ok(());
 }

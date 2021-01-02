@@ -10,13 +10,18 @@ use std::convert::From;
 
 const MAX_WORD_LENGTH: usize = 16;
 
-// TODO If I ever continue this project, make sure to fix that ugly hack that letter reserve
-//      area is first two rows of the table. There should be two vectors `placed` and `unplaced`.
-//      (Way to much logic is spent on wiggling this current hacky arrangement.)
 
+// Warning:
+//      If I ever continued this project, I'd fix that one ugly hack that makes code hard to read:
+//      First two rows of the table are reserved for unused letters. A better implemntation would
+//      have two vectors: `placed` and `unplaced`. Way to much logic is spent on wiggling this
+//      current hacky arrangement.
+
+
+/// Letter tile on grid
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Tile {
-    /// Single letter tile. Idx is position in `placed` vec
+    /// Idx is index in vectors `letters`, `placed` and `priorities`
     Occupied { idx: usize, letter: char },
     Empty,
 }
@@ -33,11 +38,17 @@ impl Tile {
     }
 }
 
+/// TilePriority is helper tool that is used to prioritize if letter tile is in important
+/// position.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TilePriority {
+    /// Letter is part of word
     Word,
+    /// Letter is part of string that is some part of word
     PartialWord,
+    /// Letter is part of string that can not become a string
     Crap,
+    /// Letter is part of string that can not become a string
     NotUsed,
 }
 
@@ -64,12 +75,13 @@ pub struct Board {
     /// Element [0] is dictionary for full words, element [1] is one for partial words with
     /// lengths 2-16 parts with length 2 and so on.
     pub dictionaries: [HashSet<String>; 2],
-    /// Random number generator
+    /// Random number generator and uniform range generators 0..100, 0..4, 0.0..1.0
     pub rng: (StdRng, Uniform<usize>, Uniform<usize>, Uniform<usize>, Uniform<f64>),
 }
 
 // Public impls
 impl Board {
+    /// Create new table where one tile is in center and other letters are in unused section
     pub fn new(side_length: usize, letters: Vec<char>, constants: Option<[usize; 5]>) -> Board {
         assert!(
             (letters.len() < side_length * 2) && (side_length >= 5) && (letters.len() >= 2),
@@ -91,7 +103,7 @@ impl Board {
         // self.letters corresponds indices with self.placed
         let placed = Vec::new();
         let priorities = Vec::new();
-        let constants = constants.unwrap_or([10, 10, 5, 50, 10]);
+        let constants = constants.unwrap_or([20, 10, 5, 50, 30]);
         let fitness = (f64::NAN, 0, false);
 
         let mut board = Board{
@@ -110,6 +122,8 @@ impl Board {
         return board;
     }
 
+    /// return table to initial position that is achieved after calling new().
+    /// Note random number generator will not reset.
     pub fn initialize(&mut self) {
         self.placed.clear();
         self.table.iter_mut().for_each(|tile| *tile = Tile::Empty);
@@ -138,6 +152,7 @@ impl Board {
         self.priorities[id] = TilePriority::Crap;
     }
 
+    /// Take one tile and move it to some position.
     pub fn random_move(&mut self) {
         if self.random_presentage() == 0 && self.centerize() {
             return;
@@ -210,6 +225,7 @@ impl Board {
         self.calc_fitness();
     }
 
+    /// Draw table
     pub fn draw(&self) {
         println!();
         for row in self.table.outer_iter() {
@@ -242,6 +258,7 @@ impl Board {
 
 // Private impls
 impl Board {
+    /// Count number of full words and partial words wich will be used as fitness measure.
     fn count_words(&mut self) -> (f64, usize) {
         let mut sum = 0.0;
         // Initialize all tiles to NotUsed and when it is iterated through, mark it as word or crap
@@ -305,7 +322,7 @@ impl Board {
                     sum += ((word.len()-1) as f64).powi(3).sqrt() * (c[1] as f64 / 10.0);
                     for id in ids {
                         let pr = &mut self.priorities[id];
-                        if *pr == TilePriority::NotUsed {
+                        if *pr == TilePriority::NotUsed || *pr == TilePriority::Word {
                             *pr = TilePriority::PartialWord;
                         }
                     }
@@ -333,6 +350,7 @@ impl Board {
         return (sum, valid_letters)
     }
 
+    /// Calculate fitness of board. The smaller fitness, the better result.
     fn calc_fitness(&mut self) {
         // Count letters, and evaluate fitness for that.
         let (s1, valid_letters) = self.count_words();
@@ -392,6 +410,7 @@ impl Board {
         self.fitness = (fitness, valid_letters, solution);
     }
 
+    /// If letters are drifted to other side, move them back to center.
     fn centerize(&mut self) -> bool {
         let mut min_y = isize::MAX;
         let mut min_x = isize::MAX;
@@ -438,7 +457,7 @@ impl Board {
         }
     }
 
-    /// Check that cross referencing indices are valid between `table` and `placed`
+    /// Check e.g. that cross referencing indices are valid between `table` and `placed`
     fn invariant(&self) -> Res<()> {
         assert!(self.letters.len() == self.placed.len());
         assert!(self.letters.len() == self.priorities.len());
@@ -490,6 +509,7 @@ impl Board {
         return Ok(());
     }
 
+    /// Construct dictionaries that will be used to check if string is word or part of word.
     fn dicts_for_word_parts() -> Res<[HashSet<String>; 2]> {
         let set1 = Self::read_all_words_from_csv()?;
 
@@ -512,6 +532,7 @@ impl Board {
         return Ok([set1, set2]);
     }
 
+    /// Read all words from local .csv file.
     fn read_all_words_from_csv() -> Res<HashSet<String>> {
         use std::{fs::File, io::{BufReader, BufRead as _}};
         let file = File::open("finnish_words.csv")?;
