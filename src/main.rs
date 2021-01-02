@@ -1,24 +1,23 @@
+#![allow(clippy::needless_return)]
 mod board;
 mod my_prelude;
 
 use my_prelude::*;
 use board::Board;
-use rand::Rng;
 
-pub fn metropolis_solve(mut board: Board, temp: f64, blocks: usize) -> (Board, usize, f64, usize) {
-    let mut fitness_old = board.fitness();
-    for b in 0..blocks {
+pub fn metropolis(mut board: Board, temp: f64, blocks: usize) -> (Board, usize, f64, usize, bool) {
+    let mut fitness_old = board.fitness;
+    for block in 0..blocks {
         let table_old = board.table.clone();
         let placed_old = board.placed.clone();
         let priorities_old = board.priorities.clone();
         board.random_move();
-        let fitness_new = board.fitness();
-        if fitness_new.0 < 0.0 {
-            return (board, b, fitness_new.0, fitness_new.1);
+        let fitness_new = board.fitness;
+        if fitness_new.2 {
+            return (board, block, fitness_new.0, fitness_new.1, true);
         }
         let diff = fitness_new.0 - fitness_old.0;
-        let rnd = board.rng.gen_range(0.0..1.0);
-        if (-diff / temp).exp() > rnd {
+        if (-diff / temp).exp() > board.random_float_0_1() {
             fitness_old = fitness_new;
         } else {
             board.table = table_old;
@@ -26,7 +25,7 @@ pub fn metropolis_solve(mut board: Board, temp: f64, blocks: usize) -> (Board, u
             board.priorities = priorities_old;
         }
     }
-    return (board, blocks, fitness_old.0, fitness_old.1);
+    return (board, blocks, fitness_old.0, fitness_old.1, false);
 }
 
 /*
@@ -50,55 +49,72 @@ Fitness 5780.171572875254, Iters: 500000, Elapsed: 5882 ms
 
  */
 
-fn run_once(letters: Vec<char>) {
-    let tot_iters = 500_000;
-    let parts = 10;
-    let mut board = Board::new(16, letters);
+#[allow(dead_code)]
+fn run_once() {
+    let given_letters: Vec<_> = "tnahivonajsnäenoilsteailk".chars().collect();
+    let tot_iters = 1_000_000;
+    let parts = 100;
+    let constants = Some([20, 10, 10, 50, 30]);
+    let mut board = Board::new(20, given_letters.clone(), constants);
     let mut iterated = 0;
     let mut letters = 0;
-    board.draw();
     let mut fitness = 0.0;
+    let mut sol  = false;
+    board.draw();
     let before = std::time::Instant::now();
     for _ in 0..parts {
-        let out = metropolis_solve(board.clone(), 1e0, tot_iters/parts);
+        let out = metropolis(board.clone(), 3.0, tot_iters/parts);
         board = out.0;
         iterated += out.1;
         fitness = out.2;
         letters = out.3;
-        println!("Fitness {}", fitness);
         board.draw();
-        if fitness < 0.0 {
-            println!("Solution found!");
+        if out.4 {
+            sol = true;
             break;
         }
+        println!("Fitness {}", fitness);
+    }
+    if sol {
+        println!("Solution found!");
+    } else {
+        println!("Solution not found :(");
     }
     println!(
-        "Fitness {:.2}, Letters: {}, Elapsed: {} ms, Iters: {},",
-        fitness, letters,  before.elapsed().as_millis(), iterated
+        "Correct letters: {}/{}, Elapsed: {} ms, Iters: {}, Fitness {:.2}, ",
+        letters, given_letters.len(), before.elapsed().as_millis(), iterated, fitness,
     )
 }
 
 #[allow(dead_code)]
 fn benchmark() {
-    let letters: Vec<char> = "aaeiiouykklmnrtpsv".chars().collect();
-    for &temp in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2].iter() {
-        let num_samples = 10;
-        let mut fit_samples= nd::Array1::from_elem(num_samples, 0.0);
-        let mut lett_samples= nd::Array1::from_elem(num_samples, 0.0);
-        let mut board = Board::new(16, letters.clone());
-        for (fit, lett) in fit_samples.iter_mut().zip(lett_samples.iter_mut()) {
-            let (_board_sol, _iters, fitness, letters) = metropolis_solve(board.clone(), temp, 100);
-            *fit = fitness;
-            *lett = letters as f64;
+    use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
+    //use rayon::prelude::*;
+    let temps = [3.0];
+
+    let letters: Vec<char> = "aaeiioukklmnrtsv".chars().collect();
+
+    let mean_std: Vec<_> = temps.par_iter().map(|temp| {
+        let c = &Some([20, 10, 10, 50, 30]);
+        let num_samples = 40;
+        let mut samples= nd::Array2::from_elem((num_samples, 3), 0.0);
+        let mut board = Board::new(16, letters.clone(), *c);
+        for mut sample in samples.axis_iter_mut(Axis(0)) {
+            let (_sol, iters, fitness, letters, _) = metropolis(board.clone(), *temp, 100_000);
+            sample[0] = fitness;
+            sample[1] = letters as f64;
+            sample[2] = iters as f64;
             board.initialize();
         }
-        let fit_mean = fit_samples.mean_axis(Axis(0)).unwrap();
-        let fit_std = fit_samples.std_axis(Axis(0), 0.0) / (fit_samples.len() as f64).sqrt();
-        let lett_mean = lett_samples.mean_axis(Axis(0)).unwrap();
-        let lett_std = lett_samples.std_axis(Axis(0), 0.0) / (lett_samples.len() as f64).sqrt();
+        let mean = samples.mean_axis(Axis(0)).unwrap();
+        let std = samples.std_axis(Axis(0), 0.0) / (num_samples as f64).sqrt();
+        (mean, std)
+    }).collect();
+
+    for (mean, std) in mean_std.into_iter() {
         println!(
-            "Temp: {:e}, fitness: {:.2}({:.2}), word letters: {:.2}({:.2})",
-            temp, fit_mean, fit_std, lett_mean, lett_std
+            "fitness: {:.2}({:.2}), letters: {:.2}({:.2}), iters: {:.2}({:.2})",
+            mean[0], std[0], mean[1], std[1], mean[2], std[2]
         );
     }
 }
@@ -150,9 +166,7 @@ fn substr(s: &str, begin: usize, length: Option<usize>) -> Result<&str, &str> {
 }
 
 fn main() -> Res<()> {
-    let letters = "aaeiiouykklmnrtpsv".chars().collect();
-    run_once(letters);
+    run_once();
     //benchmark();
-    //board::stress_test();
     return Ok(());
 }
