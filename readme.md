@@ -6,7 +6,7 @@ This is a word puzzle solver for "Bananagram" game. This does not solve a well k
 
 
 ## Background
-My sister gave Bananagram for our family as a Christmas present. She is very good at it. Because the best thing I can do is to cheat, I spent next week writing this program. (But hahaa, who laughs now! 😝)
+My sister gave Bananagram for our family as a Christmas present. She is very good at it. Because the best thing I can do is to cheat, I spent next week writing this program. (But hahaa! Who laughs now? 😝)
 
 ## Algorithm
 
