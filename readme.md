@@ -1,6 +1,6 @@
 # Scrabble cheater
 
-This project is a word puzzle solver for "Bananagram" game. The project has nothing doing with original "Scrabble" game, even though name "Scrabble cheater" may suggest so. However, bananagram is very similar to Scrabble. The objective is to arrange randomly given letter tiles to Finnish words so that all letter tiles are used.
+This project is a word puzzle solver for "Bananagram" game. The project has nothing doing with original "Scrabble" game, even though name "Scrabble cheater" may suggest so. However, bananagram is very similar to Scrabble. The objective is to arrange randomly given letter tiles to Finnish words so that all tiles are used.
 
 ![Example solution](example_image.jpg)
 
